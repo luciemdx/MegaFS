@@ -11,34 +11,30 @@ class MegaFS(fuse.Fuse):
   def __init__(self, *args, **kw):
     fuse.Fuse.__init__(self, *args, **kw)
     self.hash2path = {}
-    self.tree = {}
+    self.files = {'/': {'t': 1, 'ts': int(time.time()), 'children': []}}
 
-    client = MegaClient()
-    client.login('EMAIL', 'PASSWORD')
-    files = client.getfiles()
+    self.client = MegaClient()
+    self.client.login('EMAIL', 'PASSWORD')
+    files = self.client.getfiles()
 
     for file_h, file in files.items():
-      (head, tail) = os.path.split(self.getpath(files, file['h']))
-      t = self.tree
-      if head:
-        for part in head.split("/"):
-          if not part in t:
-            t[part] = {'children': {}}
-          t = t[part]['children']
-
-      if tail in t:
-        t[tail].update(file)
+      path = self.getpath(files, file_h)
+      dirname, basename = os.path.split(path)
+      if not dirname in self.files:
+        self.files[dirname] = {'children': []}
+      self.files[dirname]['children'].append(basename)
+      if path in self.files:
+        self.files[path].update(file)
       else:
-        t[tail] = file
+        self.files[path] = file
         if file['t'] > 0:
-          t[tail]['children'] = {}
+          self.files[path]['children'] = []
 
   def getpath(self, files, hash):
-    if not hash in self.hash2path:
-      if not files[hash]['p']:
-        path = files[hash]['a']['n']
-      else:
-        path = self.getpath(files, files[hash]['p']) + "/" + files[hash]['a']['n']
+    if not hash:
+      return ""
+    elif not hash in self.hash2path:
+      path = self.getpath(files, files[hash]['p']) + "/" + files[hash]['a']['n']
 
       i = 1
       filename, fileext = os.path.splitext(path)
@@ -52,25 +48,10 @@ class MegaFS(fuse.Fuse):
   def getattr(self, path):
     st = fuse.Stat()
 
-    if path == '/':
-      st.st_atime = int(time.time())
-      st.st_mtime = st.st_atime
-      st.st_ctime = st.st_atime
-      st.st_mode = stat.S_IFDIR | 0755
-      st.st_nlink = 2
-      st.st_size = 4096
-      return st
-
-    try:
-      (head, tail) = os.path.split(path.strip("/"))
-      t = self.tree
-      if head:
-        for part in head.split("/"):
-          t = t[part]['children']
-      file = t[tail]
-    except KeyError:
+    if path not in self.files:
       return -errno.ENOENT
 
+    file = self.files[path]
     st.st_atime = file['ts']
     st.st_mtime = st.st_atime
     st.st_ctime = st.st_atime
@@ -85,14 +66,7 @@ class MegaFS(fuse.Fuse):
     return st
 
   def readdir(self, path, offset):
-    dirents = ['.', '..']
-    if path == '/':
-      dirents.extend(self.tree.keys())
-    else:
-      t = self.tree
-      for part in path.strip("/").split("/"):
-        t = t[part]['children']
-      dirents.extend(t.keys())
+    dirents = ['.', '..'] + self.files[path]['children']
     for r in dirents:
       yield fuse.Direntry(r)
 
