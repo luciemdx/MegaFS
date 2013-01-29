@@ -1,6 +1,7 @@
 from megaclient import MegaClient
 import errno
 import fuse
+import getpass
 import os
 import stat
 import time
@@ -8,13 +9,13 @@ import time
 fuse.fuse_python_api = (0, 2)
 
 class MegaFS(fuse.Fuse):
-  def __init__(self, *args, **kw):
+  def __init__(self, client, *args, **kw):
     fuse.Fuse.__init__(self, *args, **kw)
+    self.client = client
     self.hash2path = {}
     self.files = {'/': {'t': 1, 'ts': int(time.time()), 'children': []}}
 
-    self.client = MegaClient()
-    self.client.login('EMAIL', 'PASSWORD')
+    self.client.login()
     files = self.client.getfiles()
 
     for file_h, file in files.items():
@@ -71,6 +72,11 @@ class MegaFS(fuse.Fuse):
       yield fuse.Direntry(r)
 
 if __name__ == '__main__':
-  fs = MegaFS()
+  email = raw_input("Email [%s]: " % getpass.getuser())
+  if not email:
+    email = getpass.getuser()
+  password = getpass.getpass()
+  client = MegaClient(email, password)
+  fs = MegaFS(client)
   fs.parse(errex=1)
   fs.main()

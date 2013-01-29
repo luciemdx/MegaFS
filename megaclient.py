@@ -7,9 +7,11 @@ import random
 import urllib
 
 class MegaClient:
-  def __init__(self):
+  def __init__(self, email, password):
     self.seqno = random.randint(0, 0xFFFFFFFF)
     self.sid = ''
+    self.email = email
+    self.password = password
 
   def api_req(self, req):
     url = 'https://g.api.mega.co.nz/cs?id=%d%s' % (self.seqno, '&sid=%s' % self.sid if self.sid else '')
@@ -19,10 +21,11 @@ class MegaClient:
   def post(self, url, data):
     return urllib.urlopen(url, data).read()
 
-  def login(self, email, password):
-    password_aes = prepare_key(str_to_a32(password))
-    uh = stringhash(email.lower(), password_aes)
-    res = self.api_req({'a': 'us', 'user': email, 'uh': uh})
+  def login(self):
+    password_aes = prepare_key(str_to_a32(self.password))
+    del self.password
+    uh = stringhash(self.email.lower(), password_aes)
+    res = self.api_req({'a': 'us', 'user': self.email, 'uh': uh})
 
     enc_master_key = base64_to_a32(res['k'])
     self.master_key = decrypt_key(enc_master_key, password_aes)
