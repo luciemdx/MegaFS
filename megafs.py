@@ -62,7 +62,7 @@ class MegaFS(fuse.Fuse):
       st.st_size = file['s']
     else:
       st.st_mode = stat.S_IFDIR | 0755
-      st.st_nlink = 2
+      st.st_nlink = 2 + len([child for child in file['children'] if self.files[os.path.join(path, child)]['t'] > 0])
       st.st_size = 4096
     return st
 
