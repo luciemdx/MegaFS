@@ -18,6 +18,8 @@ def a32_to_str(a):
   return struct.pack('>%dI' % len(a), *a)
 
 def str_to_a32(b):
+  if len(b) % 4:
+    b += '\0' * (4 - len(b) % 4)
   return struct.unpack('>%dI' % (len(b) / 4), b)
 
 def a32_to_base64(a):
