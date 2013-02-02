@@ -8,6 +8,7 @@ Instructions (Mac OSX)
 =====================
 
 Prerequisites:
+
     OSXFUSE     - http://osxfuse.github.com/
     fuse-python - http://pypi.python.org/pypi/fuse-python
 
