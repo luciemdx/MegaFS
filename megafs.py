@@ -71,6 +71,14 @@ class MegaFS(fuse.Fuse):
     for r in dirents:
       yield fuse.Direntry(r)
 
+  def mknod(self, path, mode, dev):
+    if path in self.files:
+      return -errno.EEXIST
+
+    dirname, basename = os.path.split(path)
+    self.files[dirname]['children'].append(basename)
+    self.files[path] = {'t': 0, 'ts': int(time.time()), 's': 0}
+
   def open(self, path, flags):
     if path not in self.files:
       return -errno.ENOENT
@@ -78,10 +86,18 @@ class MegaFS(fuse.Fuse):
     if (flags & 3) == os.O_RDONLY:
       (tmp_f, tmp_path) = tempfile.mkstemp(prefix='mega')
       os.close(tmp_f)
-      if self.client.downloadfile(self.files[path], tmp_path):
+      if 'h' not in self.files[path]:
+        return open(tmp_path, "rb")
+      elif self.client.downloadfile(self.files[path], tmp_path):
         return open(tmp_path, "rb")
       else:
         return -errno.EACCESS
+    elif (flags & 3) == os.O_WRONLY:
+      if 'h' in self.files[path]:
+        return -errno.EEXIST
+      (tmp_f, tmp_path) = tempfile.mkstemp(prefix='mega')
+      os.close(tmp_f)
+      return open(tmp_path, "wb")
     else:
       return -errno.EINVAL
 
@@ -89,8 +105,19 @@ class MegaFS(fuse.Fuse):
     fh.seek(offset)
     return fh.read(size)
 
+  def write(self, path, buf, offset, fh):
+    fh.seek(offset)
+    fh.write(buf)
+    return len(buf)
+
   def release(self, path, flags, fh):
     fh.close()
+    if fh.mode == "wb":
+      dirname, basename = os.path.split(path)
+      uploaded_file = self.client.uploadfile(fh.name, self.files[dirname]['h'], basename)
+      if 'f' in uploaded_file:
+        uploaded_file = self.client.processfile(uploaded_file['f'][0])
+        self.files[path] = uploaded_file
     os.unlink(fh.name)
 
 if __name__ == '__main__':

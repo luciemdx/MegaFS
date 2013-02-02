@@ -1,10 +1,11 @@
 from Crypto.Cipher import AES
 from Crypto.Util import Counter
 from Crypto.PublicKey import RSA
-from megacrypto import prepare_key, stringhash, decrypt_key, dec_attr, aes_cbc_encrypt_a32
+from megacrypto import prepare_key, stringhash, encrypt_key, decrypt_key, enc_attr, dec_attr, aes_cbc_encrypt_a32
 from megautil import a32_to_str, str_to_a32, a32_to_base64, base64_to_a32, mpi2int, base64urlencode, base64urldecode, get_chunks
 import binascii
 import json
+import os
 import random
 import urllib
 
@@ -53,32 +54,35 @@ class MegaClient:
       sid = binascii.unhexlify('0' + sid if len(sid) % 2 else sid)
       self.sid = base64urlencode(sid[:43])
 
+  def processfile(self, file):
+    if file['t'] == 0 or file['t'] == 1:
+      key = file['k'][file['k'].index(':') + 1:]
+      key = decrypt_key(base64_to_a32(key), self.master_key)
+      if file['t'] == 0:
+        k = file['k'] = (key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7])
+        iv = file['iv'] = key[4:6] + (0, 0)
+        meta_mac = file['meta_mac'] = key[6:8]
+      else:
+        k = file['k'] = key
+      attributes = base64urldecode(file['a'])
+      attributes = dec_attr(attributes, k)
+      file['a'] = attributes
+    elif file['t'] == 2:
+      self.root_id = file['h']
+      file['a'] = {'n': 'Cloud Drive'}
+    elif file['t'] == 3:
+      self.inbox_id = file['h']
+      file['a'] = {'n': 'Inbox'}
+    elif file['t'] == 4:
+      self.trashbin_id = file['h']
+      file['a'] = {'n': 'Rubbish Bin'}
+    return file
+
   def getfiles(self):
     files = self.api_req({'a': 'f', 'c': 1})
     files_dict = {}
     for file in files['f']:
-      if file['t'] == 0 or file['t'] == 1:
-        key = file['k'][file['k'].index(':') + 1:]
-        key = decrypt_key(base64_to_a32(key), self.master_key)
-        if file['t'] == 0:
-          k = (key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7])
-          iv = key[4:6] + (0, 0)
-          meta_mac = key[6:8]
-        else:
-          k = key
-        attributes = base64urldecode(file['a'])
-        attributes = dec_attr(attributes, k)
-        file['a'] = attributes
-      elif file['t'] == 2:
-        self.root_id = file['h']
-        file['a'] = {'n': 'Cloud Drive'}
-      elif file['t'] == 3:
-        self.inbox_id = file['h']
-        file['a'] = {'n': 'Inbox'}
-      elif file['t'] == 4:
-        self.trashbin_id = file['h']
-        file['a'] = {'n': 'Rubbish Bin'}
-      files_dict[file['h']] = file
+      files_dict[file['h']] = self.processfile(file)
     return files_dict
 
   def downloadfile(self, file, dest_path):
@@ -110,3 +114,41 @@ class MegaClient:
     infile.close()
 
     return (file_mac[0] ^ file_mac[1], file_mac[2] ^ file_mac[3]) == file['meta_mac']
+
+  def uploadfile(self, src_path, target, filename):
+    infile = open(src_path, 'rb')
+    size = os.path.getsize(src_path)
+    ul_url = self.api_req({'a': 'u', 's': size})['p']
+
+    ul_key = [random.randint(0, 0xFFFFFFFF) for _ in xrange(6)]
+    encryptor = AES.new(a32_to_str(ul_key[:4]), AES.MODE_CTR, counter = Counter.new(128, initial_value = ((ul_key[4] << 32) + ul_key[5]) << 64))
+
+    file_mac = [0, 0, 0, 0]
+    for chunk_start, chunk_size in sorted(get_chunks(size).items()):
+      chunk = infile.read(chunk_size)
+
+      chunk_mac = [ul_key[4], ul_key[5], ul_key[4], ul_key[5]]
+      for i in xrange(0, len(chunk), 16):
+        block = chunk[i:i+16]
+        if len(block) % 16:
+          block += '\0' * (16 - len(block) % 16)
+        block = str_to_a32(block)
+        chunk_mac = [chunk_mac[0] ^ block[0], chunk_mac[1] ^ block[1], chunk_mac[2] ^ block[2], chunk_mac[3] ^ block[3]]
+        chunk_mac = aes_cbc_encrypt_a32(chunk_mac, ul_key[:4])
+
+      file_mac = [file_mac[0] ^ chunk_mac[0], file_mac[1] ^ chunk_mac[1], file_mac[2] ^ chunk_mac[2], file_mac[3] ^ chunk_mac[3]]
+      file_mac = aes_cbc_encrypt_a32(file_mac, ul_key[:4])
+
+      chunk = encryptor.encrypt(chunk)
+      outfile = urllib.urlopen(ul_url + "/" + str(chunk_start), chunk)
+      completion_handle = outfile.read()
+      outfile.close()
+
+    infile.close()
+
+    meta_mac = (file_mac[0] ^ file_mac[1], file_mac[2] ^ file_mac[3])
+
+    attributes = {'n': filename}
+    enc_attributes = enc_attr(attributes, ul_key[:4])
+    key = [ul_key[0] ^ ul_key[4], ul_key[1] ^ ul_key[5], ul_key[2] ^ meta_mac[0], ul_key[3] ^ meta_mac[1], ul_key[4], ul_key[5], meta_mac[0], meta_mac[1]]
+    return self.api_req({'a': 'p', 't': target, 'n': [{'h': completion_handle, 't': 0, 'a': base64urlencode(enc_attributes), 'k': a32_to_base64(encrypt_key(key, self.master_key))}]})

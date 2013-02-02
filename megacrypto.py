@@ -36,8 +36,17 @@ def prepare_key(a):
       pkey = aes_cbc_encrypt_a32(pkey, key)
   return pkey
 
+def encrypt_key(a, key):
+  return sum((aes_cbc_encrypt_a32(a[i:i+4], key) for i in xrange(0, len(a), 4)), ())
+
 def decrypt_key(a, key):
   return sum((aes_cbc_decrypt_a32(a[i:i+4], key) for i in xrange(0, len(a), 4)), ())
+
+def enc_attr(attr, key):
+  attr = 'MEGA' + json.dumps(attr)
+  if len(attr) % 16:
+    attr += '\0' * (16 - len(attr) % 16)
+  return aes_cbc_encrypt(attr, a32_to_str(key))
 
 def dec_attr(attr, key):
   attr = aes_cbc_decrypt(attr, a32_to_str(key)).rstrip('\0')
