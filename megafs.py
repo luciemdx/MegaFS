@@ -4,6 +4,7 @@ import fuse
 import getpass
 import os
 import stat
+import tempfile
 import time
 
 fuse.fuse_python_api = (0, 2)
@@ -47,11 +48,10 @@ class MegaFS(fuse.Fuse):
     return self.hash2path[hash]
 
   def getattr(self, path):
-    st = fuse.Stat()
-
     if path not in self.files:
       return -errno.ENOENT
 
+    st = fuse.Stat()
     file = self.files[path]
     st.st_atime = file['ts']
     st.st_mtime = st.st_atime
@@ -70,6 +70,28 @@ class MegaFS(fuse.Fuse):
     dirents = ['.', '..'] + self.files[path]['children']
     for r in dirents:
       yield fuse.Direntry(r)
+
+  def open(self, path, flags):
+    if path not in self.files:
+      return -errno.ENOENT
+
+    if (flags & 3) == os.O_RDONLY:
+      (tmp_f, tmp_path) = tempfile.mkstemp(prefix='mega')
+      os.close(tmp_f)
+      if self.client.downloadfile(self.files[path], tmp_path):
+        return open(tmp_path, "rb")
+      else:
+        return -errno.EACCESS
+    else:
+      return -errno.EINVAL
+
+  def read(self, path, size, offset, fh):
+    fh.seek(offset)
+    return fh.read(size)
+
+  def release(self, path, flags, fh):
+    fh.close()
+    os.unlink(fh.name)
 
 if __name__ == '__main__':
   email = raw_input("Email [%s]: " % getpass.getuser())

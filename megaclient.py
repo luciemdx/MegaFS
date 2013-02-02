@@ -1,6 +1,8 @@
+from Crypto.Cipher import AES
+from Crypto.Util import Counter
 from Crypto.PublicKey import RSA
-from megacrypto import prepare_key, stringhash, decrypt_key, dec_attr
-from megautil import a32_to_str, str_to_a32, a32_to_base64, base64_to_a32, mpi2int, base64urlencode, base64urldecode
+from megacrypto import prepare_key, stringhash, decrypt_key, dec_attr, aes_cbc_encrypt_a32
+from megautil import a32_to_str, str_to_a32, a32_to_base64, base64_to_a32, mpi2int, base64urlencode, base64urldecode, get_chunks
 import binascii
 import json
 import random
@@ -78,3 +80,33 @@ class MegaClient:
         file['a'] = {'n': 'Rubbish Bin'}
       files_dict[file['h']] = file
     return files_dict
+
+  def downloadfile(self, file, dest_path):
+    dl_url = self.api_req({'a': 'g', 'g': 1, 'n': file['h']})['g']
+
+    infile = urllib.urlopen(dl_url)
+    outfile = open(dest_path, 'wb')
+    decryptor = AES.new(a32_to_str(file['k']), AES.MODE_CTR, counter = Counter.new(128, initial_value = ((file['iv'][0] << 32) + file['iv'][1]) << 64))
+
+    file_mac = [0, 0, 0, 0]
+    for chunk_start, chunk_size in sorted(get_chunks(file['s']).items()):
+      chunk = infile.read(chunk_size)
+      chunk = decryptor.decrypt(chunk)
+      outfile.write(chunk)
+
+      chunk_mac = [file['iv'][0], file['iv'][1], file['iv'][0], file['iv'][1]]
+      for i in xrange(0, len(chunk), 16):
+        block = chunk[i:i+16]
+        if len(block) % 16:
+          block += '\0' * (16 - (len(block) % 16))
+        block = str_to_a32(block)
+        chunk_mac = [chunk_mac[0] ^ block[0], chunk_mac[1] ^ block[1], chunk_mac[2] ^ block[2], chunk_mac[3] ^ block[3]]
+        chunk_mac = aes_cbc_encrypt_a32(chunk_mac, file['k'])
+
+      file_mac = [file_mac[0] ^ chunk_mac[0], file_mac[1] ^ chunk_mac[1], file_mac[2] ^ chunk_mac[2], file_mac[3] ^ chunk_mac[3]]
+      file_mac = aes_cbc_encrypt_a32(file_mac, file['k'])
+
+    outfile.close()
+    infile.close()
+
+    return (file_mac[0] ^ file_mac[1], file_mac[2] ^ file_mac[3]) == file['meta_mac']
