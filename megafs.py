@@ -6,6 +6,7 @@ import os
 import stat
 import tempfile
 import time
+import sys
 
 fuse.fuse_python_api = (0, 2)
 
@@ -122,6 +123,9 @@ class MegaFS(fuse.Fuse):
         os.unlink(fh.name)
 
 if __name__ == '__main__':
+    if len(sys.argv) != 2:
+        print 'Usage: megafs.py MOUNT_POINT'
+        sys.exit(1)
     email = raw_input("Email [%s]: " % getpass.getuser())
     if not email:
         email = getpass.getuser()
@@ -130,3 +134,4 @@ if __name__ == '__main__':
     fs = MegaFS(client)
     fs.parse(errex=1)
     fs.main()
+    
