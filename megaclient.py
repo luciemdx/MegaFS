@@ -8,6 +8,7 @@ import json
 import os
 import random
 import urllib
+import sys
 
 
 class MegaClient:
@@ -20,7 +21,11 @@ class MegaClient:
     def api_req(self, req):
         url = 'https://g.api.mega.co.nz/cs?id=%d%s' % (self.seqno, '&sid=%s' % self.sid if self.sid else '')
         self.seqno += 1
-        return json.loads(self.post(url, json.dumps([req])))[0]
+        response = self.post(url, json.dumps([req]))
+        if not response.startswith('['):
+            print 'error when connecting to mega:', response
+            exit(1)
+        return json.loads(response)[0]
 
     def post(self, url, data):
         return urllib.urlopen(url, data).read()
