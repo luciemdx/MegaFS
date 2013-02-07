@@ -123,9 +123,7 @@ class MegaFS(fuse.Fuse):
         os.unlink(fh.name)
 
 if __name__ == '__main__':
-    args = sys.argv[1:]
-    print args
-    if not args:
+    if len(sys.argv) != 2:
         print 'Usage: megafs.py MOUNT_POINT'
         sys.exit(1)
     email = raw_input("Email [%s]: " % getpass.getuser())
@@ -135,4 +133,5 @@ if __name__ == '__main__':
     client = MegaClient(email, password)
     fs = MegaFS(client)
     fs.parse(errex=1)
-    fs.main(args)
+    fs.main()
+    
