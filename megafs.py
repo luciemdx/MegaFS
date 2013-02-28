@@ -45,7 +45,7 @@ class MegaFS(fuse.Fuse):
                 path = filename + ' (%d)' % i + fileext
                 i += 1
 
-            self.hash2path[hash] = path.encode()
+            self.hash2path[hash] = path.encode('utf-8')
         return self.hash2path[hash]
 
     def getattr(self, path):
