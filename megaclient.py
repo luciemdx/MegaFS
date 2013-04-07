@@ -55,19 +55,31 @@ class MegaClient:
             sid = binascii.unhexlify('0' + sid if len(sid) % 2 else sid)
             self.sid = base64urlencode(sid[:43])
 
-    def processfile(self, file):
+    def processfile(self, file, users_keys):
         if file['t'] == 0 or file['t'] == 1:
-            key = file['k'][file['k'].index(':') + 1:]
-            key = decrypt_key(base64_to_a32(key), self.master_key)
-            if file['t'] == 0:
-                k = file['k'] = (key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7])
-                iv = file['iv'] = key[4:6] + (0, 0)
-                meta_mac = file['meta_mac'] = key[6:8]
-            else:
-                k = file['k'] = key
-            attributes = base64urldecode(file['a'])
-            attributes = dec_attr(attributes, k)
-            file['a'] = attributes
+            keys = dict(keypart.split(':',1) for keypart in file['k'].split('/'))
+            uid = file['u']
+            key = None
+            if uid in keys :
+                key = decrypt_key(base64_to_a32( keys[uid] ), self.master_key)
+            elif 'su' in file and 'sk' in file and ':' in file['k']:
+                user_key = decrypt_key(base64_to_a32(file['sk']),self.master_key)
+                key = decrypt_key(base64_to_a32(keys[file['h']]),user_key)
+                users_keys[file['su']] = (file['h'],user_key)
+            elif file['u'] and file['u'] in users_keys and users_keys[file['u']][0] in keys:
+                user_key = users_keys[file['u']]
+                key = keys[user_key[0]]
+                key = decrypt_key(base64_to_a32(key),user_key[1])
+            if key is not None :
+                if file['t'] == 0:
+                    k = file['k'] = (key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7])
+                    iv = file['iv'] = key[4:6] + (0, 0)
+                    meta_mac = file['meta_mac'] = key[6:8]
+                else:
+                    k = file['k'] = key
+                attributes = base64urldecode(file['a'])
+                attributes = dec_attr(attributes, k)
+                file['a'] = attributes
         elif file['t'] == 2:
             self.root_id = file['h']
             file['a'] = {'n': 'Cloud Drive'}
@@ -82,8 +94,9 @@ class MegaClient:
     def getfiles(self):
         files = self.api_req({'a': 'f', 'c': 1})
         files_dict = {}
+        users_keys={}
         for file in files['f']:
-            files_dict[file['h']] = self.processfile(file)
+            files_dict[file['h']] = self.processfile(file,users_keys)
         return files_dict
 
     def downloadfile(self, file, dest_path):
