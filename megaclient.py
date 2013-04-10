@@ -61,15 +61,23 @@ class MegaClient:
             uid = file['u']
             key = None
             if uid in keys :
+                # normal file or folder
                 key = decrypt_key(base64_to_a32( keys[uid] ), self.master_key)
             elif 'su' in file and 'sk' in file and ':' in file['k']:
+                # Shared folder
                 user_key = decrypt_key(base64_to_a32(file['sk']),self.master_key)
                 key = decrypt_key(base64_to_a32(keys[file['h']]),user_key)
-                users_keys[file['su']] = (file['h'],user_key)
-            elif file['u'] and file['u'] in users_keys and users_keys[file['u']][0] in keys:
-                user_key = users_keys[file['u']]
-                key = keys[user_key[0]]
-                key = decrypt_key(base64_to_a32(key),user_key[1])
+                if file['su'] not in users_keys :
+                    users_keys[file['su']] = {}
+                users_keys[file['su']][file['h']] = user_key
+            elif file['u'] and file['u'] in users_keys :
+                # Shared file
+                for hkey in users_keys[file['u']] :
+                    user_key = users_keys[file['u']][hkey]
+                    if hkey in keys :
+                        key = keys[hkey]
+                        key = decrypt_key(base64_to_a32(key),user_key)
+                        break
             if key is not None :
                 if file['t'] == 0:
                     k = file['k'] = (key[0] ^ key[4], key[1] ^ key[5], key[2] ^ key[6], key[3] ^ key[7])
@@ -91,10 +99,23 @@ class MegaClient:
             file['a'] = {'n': 'Rubbish Bin'}
         return file
 
+    def init_sharedkeys(self,files,users_keys) :
+        # Init shared keys that comes from shared folders that aren't shared anymore
+        ok_dict = {}
+        for ok_item in files['ok'] :
+            user_key = decrypt_key(base64_to_a32(ok_item['k']),self.master_key)
+            ok_dict[ok_item['h']] = user_key
+        for s_item in files['s'] :
+            if s_item['u'] not in users_keys :
+                users_keys[s_item['u']] = {}
+            if s_item['h'] in ok_dict :
+                users_keys[s_item['u']][s_item['h']] = ok_dict[s_item['h']]
+
     def getfiles(self):
         files = self.api_req({'a': 'f', 'c': 1})
         files_dict = {}
         users_keys={}
+        self.init_sharedkeys(files,users_keys)
         for file in files['f']:
             files_dict[file['h']] = self.processfile(file,users_keys)
         return files_dict
